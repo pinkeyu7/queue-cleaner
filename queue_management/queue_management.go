@@ -10,6 +10,8 @@ import (
 )
 
 func InactiveQueueList() ([]queue.QueueWithType, error) {
+	needDeleteQueue := make([]queue.QueueWithType, 0)
+
 	queueList, err := queue_api.ListQueue()
 	if err != nil {
 		return nil, err
@@ -17,34 +19,49 @@ func InactiveQueueList() ([]queue.QueueWithType, error) {
 
 	queueWithTypes := queueWithTypesList(queueList)
 
-	emptyConsumerQueue := emptyConsumer(queueWithTypes)
-	printState("Empty Consumer Queue", emptyConsumerQueue)
-	err = deleteQueue(emptyConsumerQueue)
-	if err != nil {
-		return nil, err
-	}
-
 	remnantQueue := remnant(queueWithTypes)
+	//needDeleteQueue = append(needDeleteQueue, remnantQueue...)
 	printState("Remnant Queue", remnantQueue)
-	err = deleteQueue(remnantQueue)
+
+	emptyConsumerQueue := emptyConsumer(queueWithTypes)
+	needDeleteQueue = append(needDeleteQueue, emptyConsumerQueue...)
+	printState("Empty Consumer Queue", emptyConsumerQueue)
+
+	deleteQueueLength, deletedAmount, err := deleteQueue(needDeleteQueue)
 	if err != nil {
 		return nil, err
 	}
 
-	return queueWithTypes, nil
+	fmt.Println("deleteQueueLength:", deleteQueueLength, ", deletedAmount:", deletedAmount)
+
+	return needDeleteQueue, nil
 }
 
-func deleteQueue(queueWithTypes []queue.QueueWithType) error {
-	if config.IsDeleteMode() {
-		for _, q := range queueWithTypes {
-			err := queue_api.DeleteQueue(q.Name)
-			if err != nil {
-				return err
-			}
+func deleteQueue(queueWithTypes []queue.QueueWithType) (int, int, error) {
+	sessionMap := make(map[string]bool)
+	list := make([]queue.QueueWithType, 0)
+	count := 0
+
+	for _, q := range queueWithTypes {
+		if _, value := sessionMap[q.Name]; !value {
+			sessionMap[q.Name] = true
+			list = append(list, q)
 		}
 	}
 
-	return nil
+	listLen := len(list)
+
+	if config.IsDeleteMode() {
+		for _, q := range list {
+			err := queue_api.DeleteQueue(q.Name)
+			if err != nil {
+				return listLen, count, err
+			}
+			count++
+		}
+	}
+
+	return listLen, count, nil
 }
 
 func printState(name string, queueWithTypes []queue.QueueWithType) {
